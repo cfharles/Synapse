@@ -1,0 +1,14 @@
+# Your personal vault: never commit it to the public repo
+my-vault/
+vault/
+
+# Secrets
+.env
+*.key
+credentials*.json
+token*.json
+
+# OS / editor
+.DS_Store
+.obsidian/workspace*
+node_modules/

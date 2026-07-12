@@ -1,0 +1,14 @@
+{
+  "name": "synapse",
+  "version": "0.1.0",
+  "description": "Obsidian minus the manual labor. Dump messy thoughts; an AI librarian files them clean.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "bin": { "synapse": "src/index.js" },
+  "scripts": {
+    "start": "node src/index.js",
+    "ui": "node src/server.js",
+    "init": "node src/init.js"
+  }
+}

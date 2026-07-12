@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synapse</title>
+<style>
+  :root {
+    --bg: #faf9f5;
+    --panel: #ffffff;
+    --ink: #1a1a17;
+    --muted: #8a8578;
+    --line: #e8e5dc;
+    --accent: #c9673d;
+    --accent-soft: #f5e6dd;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1f1e1a; --panel: #292823; --ink: #ece9e2; --muted: #8f8b7f;
+      --line: #3a382f; --accent: #d97e50; --accent-soft: #3d2c22;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 18px;
+    padding: 14px 22px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; font-weight: 650; letter-spacing: .2px; }
+  header h1 span { color: var(--accent); }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button {
+    border: 0; background: none; color: var(--muted); font: inherit;
+    font-size: 14px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  }
+  nav button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  main { flex: 1; overflow: hidden; display: flex; justify-content: center; }
+  .view { width: min(760px, 100%); padding: 20px 22px; overflow-y: auto; display: none; }
+  .view.active { display: block; }
+
+  /* chat */
+  #chatView { display: none; flex-direction: column; }
+  #chatView.active { display: flex; }
+  #stream { flex: 1; overflow-y: auto; padding-bottom: 12px; }
+  .msg { margin: 10px 0; max-width: 85%; }
+  .msg.you {
+    margin-left: auto; background: var(--panel); border: 1px solid var(--line);
+    padding: 10px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap;
+  }
+  .msg.agent { color: var(--muted); font-family: var(--mono); font-size: 13.5px; white-space: pre-wrap; }
+  .msg.agent.q { color: var(--accent); font-family: inherit; font-size: 15px; }
+  .msg.agent.err { color: #b0483a; }
+  #composer {
+    display: flex; gap: 10px; padding: 14px 0 20px; align-items: flex-end;
+  }
+  #box {
+    flex: 1; resize: none; border: 1px solid var(--line); background: var(--panel);
+    color: var(--ink); border-radius: 14px; padding: 13px 16px; font: inherit;
+    max-height: 160px; outline: none;
+  }
+  #box:focus { border-color: var(--accent); }
+  #send, #undo {
+    border: 0; border-radius: 12px; padding: 12px 18px; font: inherit;
+    cursor: pointer; font-weight: 600;
+  }
+  #send { background: var(--accent); color: #fff; }
+  #undo { background: none; color: var(--muted); font-size: 13px; padding: 12px 8px; }
+  .hint { color: var(--muted); font-size: 12.5px; text-align: center; padding-bottom: 10px; }
+
+  /* lists */
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; margin: 10px 0;
+  }
+  .card .meta { color: var(--muted); font-size: 12.5px; margin-bottom: 6px; font-family: var(--mono); }
+  .card .links { color: var(--accent); font-size: 13px; margin-top: 8px; }
+  h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 18px 0 4px; }
+  .task { display: flex; gap: 10px; align-items: baseline; }
+  .task .score { font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 34px; text-align: right; }
+  .task .due { color: var(--accent); font-size: 13px; }
+  .task .prio { font-size: 12px; }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+
+  /* graph */
+  #graphCanvas { width: 100%; height: 100%; display: block; }
+  #graphView { padding: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>◆</span> Synapse</h1>
+  <nav>
+    <button data-tab="chat" class="active">Chat</button>
+    <button data-tab="thoughts">Thoughts</button>
+    <button data-tab="graph">Graph</button>
+    <button data-tab="tasks">Tasks</button>
+    <button data-tab="agenda">Agenda</button>
+  </nav>
+</header>
+<main>
+  <div id="chatView" class="view active">
+    <div id="stream"></div>
+    <div id="composer">
+      <textarea id="box" rows="1" placeholder="Dump anything: a thought, a task, something happening…" autofocus></textarea>
+      <button id="undo" title="Revert last filing">undo</button>
+      <button id="send">Send</button>
+    </div>
+    <div class="hint">Enter to send · Shift+Enter for a new line · everything lands in your vault</div>
+  </div>
+  <div id="thoughtsView" class="view"></div>
+  <div id="graphView" class="view"><canvas id="graphCanvas"></canvas></div>
+  <div id="tasksView" class="view"></div>
+  <div id="agendaView" class="view"></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const stream = $("#stream");
+const box = $("#box");
+let pendingId = null;
+
+// ---------- chat ----------
+
+function add(cls, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.textContent = text;
+  stream.appendChild(d);
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function handle(ev) {
+  if (ev.error) { add("agent err", "⚠ " + ev.error); pendingId = null; box.placeholder = "Dump anything…"; return; }
+  if (ev.question) {
+    pendingId = ev.id;
+    add("agent q", "❓ " + ev.question);
+    box.placeholder = "Answer…";
+    return;
+  }
+  pendingId = null;
+  box.placeholder = "Dump anything: a thought, a task, something happening…";
+  for (const line of ev.confirmations || []) add("agent", line);
+}
+
+async function send() {
+  const text = box.value.trim();
+  if (!text) return;
+  box.value = ""; box.style.height = "auto";
+  add("you", text);
+  try {
+    const url = pendingId ? "/api/answer" : "/api/message";
+    const payload = pendingId ? { id: pendingId, answer: text } : { text };
+    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    handle(await r.json());
+  } catch (e) { add("agent err", "⚠ " + e.message); }
+}
+
+$("#send").onclick = send;
+$("#undo").onclick = async () => {
+  const r = await (await fetch("/api/undo", { method: "POST" })).json();
+  add("agent", r.ok ? "↩ Reverted: " + r.reverted : r.reason);
+};
+box.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+box.addEventListener("input", () => { box.style.height = "auto"; box.style.height = box.scrollHeight + "px"; });
+
+// ---------- tabs ----------
+
+const loaders = { thoughts: loadThoughts, graph: loadGraph, tasks: loadTasks, agenda: loadAgenda };
+document.querySelectorAll("nav button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
+    document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+    b.classList.add("active");
+    $("#" + b.dataset.tab + "View").classList.add("active");
+    loaders[b.dataset.tab]?.();
+    if (b.dataset.tab === "chat") box.focus();
+  };
+});
+
+// ---------- thoughts ----------
+
+async function loadThoughts() {
+  const v = $("#thoughtsView");
+  const list = await (await fetch("/api/thoughts")).json();
+  v.innerHTML = list.length ? "" : '<div class="empty">No thoughts yet. Go dump one.</div>';
+  for (const t of list) {
+    const c = document.createElement("div");
+    c.className = "card";
+    c.innerHTML = `<div class="meta">${esc(t.date)} · ${esc(t.name)}</div>` +
+      `<div>${esc(t.cleaned)}</div>` +
+      (t.links.length ? `<div class="links">${t.links.map((l) => "[[" + esc(l) + "]]").join(" · ")}</div>` : "");
+    v.appendChild(c);
+  }
+}
+
+// ---------- tasks ----------
+
+async function loadTasks() {
+  const v = $("#tasksView");
+  const list = await (await fetch("/api/tasks")).json();
+  if (!list.length) { v.innerHTML = '<div class="empty">No open tasks. Enjoy it.</div>'; return; }
+  v.innerHTML = "";
+  const groups = [["Ranked", list.filter((t) => t.bucket !== "waiting")], ["Waiting", list.filter((t) => t.bucket === "waiting")]];
+  for (const [name, items] of groups) {
+    if (!items.length) continue;
+    const h = document.createElement("h2");
+    h.className = "section"; h.textContent = name;
+    v.appendChild(h);
+    for (const t of items) {
+      const c = document.createElement("div");
+      c.className = "card task";
+      c.innerHTML = `<span class="score">${t.score}</span><span>${esc(t.text)}` +
+        `${t.priority === "high" ? ' <span class="prio">⏫</span>' : t.priority === "low" ? ' <span class="prio">🔽</span>' : ""}` +
+        `${t.due ? ` <span class="due">due ${esc(t.due)}</span>` : ""}</span>`;
+      v.appendChild(c);
+    }
+  }
+}
+
+// ---------- agenda ----------
+
+async function loadAgenda() {
+  const v = $("#agendaView");
+  const { events, source, error } = await (await fetch("/api/agenda")).json();
+  v.innerHTML = "";
+  const h = document.createElement("h2");
+  h.className = "section";
+  h.textContent = source === "google" ? "Next 7 days (Google Calendar)" : source === "mirror" ? "Local mirror (connect Google Calendar for live data)" : "Calendar error: " + error;
+  v.appendChild(h);
+  if (!events.length) { v.innerHTML += '<div class="empty">Nothing booked.</div>'; return; }
+  for (const e of events) {
+    const c = document.createElement("div");
+    c.className = "card";
+    c.innerHTML = `<span style="font-family:var(--mono);font-size:13.5px">${esc(e)}</span>`;
+    v.appendChild(c);
+  }
+}
+
+// ---------- graph (tiny hand-rolled force layout) ----------
+
+let graphRunning = false;
+async function loadGraph() {
+  const { nodes, edges } = await (await fetch("/api/graph")).json();
+  const canvas = $("#graphCanvas");
+  const ctx = canvas.getContext("2d");
+  const wrap = $("#graphView");
+  canvas.width = wrap.clientWidth * devicePixelRatio;
+  canvas.height = wrap.clientHeight * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+
+  const style = getComputedStyle(document.documentElement);
+  const cThought = style.getPropertyValue("--muted").trim();
+  const cHub = style.getPropertyValue("--accent").trim();
+  const cInk = style.getPropertyValue("--ink").trim();
+  const cLine = style.getPropertyValue("--line").trim();
+
+  for (const n of nodes) {
+    n.x = W / 2 + (Math.random() - 0.5) * W * 0.6;
+    n.y = H / 2 + (Math.random() - 0.5) * H * 0.6;
+    n.vx = 0; n.vy = 0;
+    n.r = n.type === "hub" ? 9 : n.type === "thought" ? 5 : 6;
+    n.deg = 0;
+  }
+  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const links = edges.map((e) => ({ a: byId[e.source], b: byId[e.target] })).filter((l) => l.a && l.b);
+  for (const l of links) { l.a.deg++; l.b.deg++; }
+
+  let ticks = 0;
+  graphRunning = true;
+  function step() {
+    if (!$("#graphView").classList.contains("active")) { graphRunning = false; return; }
+    // physics
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy || 1;
+        const f = 1800 / d2;
+        const d = Math.sqrt(d2);
+        dx /= d; dy /= d;
+        a.vx -= dx * f; a.vy -= dy * f;
+        b.vx += dx * f; b.vy += dy * f;
+      }
+    }
+    for (const l of links) {
+      let dx = l.b.x - l.a.x, dy = l.b.y - l.a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const f = (d - 90) * 0.01;
+      dx /= d; dy /= d;
+      l.a.vx += dx * f * d; l.a.vy += dy * f * d;
+      l.b.vx -= dx * f * d; l.b.vy -= dy * f * d;
+    }
+    for (const n of nodes) {
+      n.vx += (W / 2 - n.x) * 0.002; n.vy += (H / 2 - n.y) * 0.002;
+      n.vx *= 0.85; n.vy *= 0.85;
+      n.x += n.vx; n.y += n.vy;
+    }
+    // draw
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = cLine; ctx.lineWidth = 1;
+    for (const l of links) {
+      ctx.beginPath(); ctx.moveTo(l.a.x, l.a.y); ctx.lineTo(l.b.x, l.b.y); ctx.stroke();
+    }
+    for (const n of nodes) {
+      ctx.beginPath();
+      ctx.fillStyle = n.type === "hub" ? cHub : cThought;
+      ctx.arc(n.x, n.y, n.r + Math.min(n.deg, 6), 0, 7);
+      ctx.fill();
+      ctx.fillStyle = cInk;
+      ctx.font = "11px " + style.getPropertyValue("--mono");
+      ctx.fillText(n.id.replace(/^\d{4}-\d{2}-\d{2}-/, "").slice(0, 24), n.x + n.r + 6, n.y + 3);
+    }
+    if (ticks++ < 600 && graphRunning) requestAnimationFrame(step);
+  }
+  step();
+  if (!nodes.length) {
+    ctx.fillStyle = cThought;
+    ctx.font = "15px system-ui";
+    ctx.fillText("The graph grows as you think. Nothing here yet.", W / 2 - 160, H / 2);
+  }
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>
