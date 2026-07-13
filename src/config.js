@@ -9,7 +9,20 @@ const DEFAULTS = {
   maxClarifyRounds: 2,
 };
 
+/** Auto-load .env so users never need to export manually. Shell env wins. */
+function loadDotEnv(repoRoot) {
+  const p = path.join(repoRoot, ".env");
+  if (!fs.existsSync(p)) return;
+  for (const line of fs.readFileSync(p, "utf8").split("\n")) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (m && m[2] && !(m[1] in process.env)) {
+      process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    }
+  }
+}
+
 export function loadConfig(repoRoot = process.cwd()) {
+  loadDotEnv(repoRoot);
   let fileCfg = {};
   const p = path.join(repoRoot, "synapse.config.json");
   if (fs.existsSync(p)) {

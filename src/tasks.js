@@ -108,9 +108,17 @@ function readMd(vault) {
   return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "# Tasks\n";
 }
 
-/** Add a task and re-rank the whole file. Returns the bucket it landed in. */
+const normText = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Add a task and re-rank the whole file. Returns { bucket, duplicate }. */
 export function addTask(vault, { cleaned, due = null, priority = "normal", bucket = null }) {
   const tasks = parseTasks(readMd(vault));
+  // Dedupe: the same task phrased the same way is filed once.
+  const dup = tasks.find(
+    (t) => !t.done && (normText(t.text) === normText(cleaned) ||
+      normText(t.text).includes(normText(cleaned)) || normText(cleaned).includes(normText(t.text)))
+  );
+  if (dup) return { bucket: null, duplicate: true, existing: dup.text };
   tasks.push({
     text: cleaned,
     done: false,
@@ -121,12 +129,27 @@ export function addTask(vault, { cleaned, due = null, priority = "normal", bucke
   });
   const md = render(tasks);
   fs.writeFileSync(vault.p("tasks.md"), md);
-  if (bucket === "waiting") return "waiting";
+  if (bucket === "waiting") return { bucket: "waiting", duplicate: false };
   const line = md.split("\n").find((l) => l.includes(cleaned));
   const before = md.slice(0, md.indexOf(line));
-  if (before.includes(HEADERS.later)) return "later";
-  if (before.includes(HEADERS.week)) return "week";
-  return "top5";
+  let landed = "top5";
+  if (before.includes(HEADERS.later)) landed = "later";
+  else if (before.includes(HEADERS.week)) landed = "week";
+  return { bucket: landed, duplicate: false };
+}
+
+/** Complete a task from the UI: archive it immediately with today's date. */
+export function completeTask(vault, text) {
+  const tasks = parseTasks(readMd(vault));
+  const t = tasks.find((x) => !x.done && x.text === text);
+  if (!t) return false;
+  fs.mkdirSync(vault.p("archive"), { recursive: true });
+  fs.appendFileSync(
+    vault.p("archive", "done-tasks.md"),
+    `- [x] ${t.text} ✅ ${dateStamp()}\n`
+  );
+  fs.writeFileSync(vault.p("tasks.md"), render(tasks.filter((x) => x !== t)));
+  return true;
 }
 
 /** Re-rank in place (run any time; cheap and idempotent). */

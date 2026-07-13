@@ -49,6 +49,12 @@ Rules for this call:
 - "correction": the user is telling you a previous filing or behavior was wrong
   ("no, that was...", "actually...", "stop doing..."). cleaned = one concise
   statement of what should change. Corrections become permanent rules.
+- A commitment with a day but NO explicit clock time ("I want to read today",
+  "I have to workout tomorrow") is a TASK with a due date — NOT an event. An
+  event REQUIRES a specific clock time in the user's words ("at 7am").
+- Ask AT MOST ONE question per message: pick the single most important
+  ambiguity. A clarifying answer is authoritative for ALL items with
+  overlapping content — never re-ask about the same sentence in another form.
 - If prior clarifying answers are provided, use them and do not re-ask.
 
 Existing notes in the vault:
@@ -77,7 +83,26 @@ export async function complete({ system, user, cfg }) {
     throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
   }
   const data = await res.json();
-  return data.content?.[0]?.text ?? "";
+  // The answer may not be the first block (e.g. thinking blocks come first).
+  const block = (data.content || []).find((b) => b.type === "text");
+  return block?.text ?? "";
+}
+
+/** Tolerant JSON extraction: fences, preambles, trailing prose. */
+export function extractJson(text) {
+  const cleaned = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    }
+    throw new Error(
+      `Model returned non-JSON (first 200 chars): ${cleaned.slice(0, 200) || "(empty)"}`
+    );
+  }
 }
 
 export async function classify({ message, rules, vaultIndex, cfg, qa = [] }) {
@@ -95,8 +120,7 @@ export async function classify({ message, rules, vaultIndex, cfg, qa = [] }) {
     user: userContent,
     cfg,
   });
-  const json = text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "");
-  return JSON.parse(json);
+  return extractJson(text);
 }
 
 // ---------- deterministic mock (tests only) ----------

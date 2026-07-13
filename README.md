@@ -40,9 +40,8 @@ Requires Node 18+ and git. Zero npm dependencies.
 ```bash
 git clone <this repo> && cd Synapse
 npm run init                 # creates ./my-vault from the template (private git repo)
-cp .env.example .env         # add your ANTHROPIC_API_KEY
-export $(cat .env | xargs)
-npm start                    # interactive: just start typing
+cp .env.example .env         # add your ANTHROPIC_API_KEY (.env is loaded automatically)
+npm run ui                   # → http://127.0.0.1:8377
 ```
 
 Point Obsidian at `my-vault/` to watch the graph grow. Google Calendar setup (optional, 5 min): `docs/gcal-setup.md`.

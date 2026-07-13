@@ -99,7 +99,6 @@
     <button data-tab="thoughts">Thoughts</button>
     <button data-tab="graph">Graph</button>
     <button data-tab="tasks">Tasks</button>
-    <button data-tab="agenda">Agenda</button>
   </nav>
 </header>
 <main>
@@ -115,7 +114,6 @@
   <div id="thoughtsView" class="view"></div>
   <div id="graphView" class="view"><canvas id="graphCanvas"></canvas></div>
   <div id="tasksView" class="view"></div>
-  <div id="agendaView" class="view"></div>
 </main>
 
 <script>
@@ -172,7 +170,7 @@ box.addEventListener("input", () => { box.style.height = "auto"; box.style.heigh
 
 // ---------- tabs ----------
 
-const loaders = { thoughts: loadThoughts, graph: loadGraph, tasks: loadTasks, agenda: loadAgenda };
+const loaders = { thoughts: loadThoughts, graph: loadGraph, tasks: loadTasks };
 document.querySelectorAll("nav button").forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
@@ -216,30 +214,19 @@ async function loadTasks() {
     for (const t of items) {
       const c = document.createElement("div");
       c.className = "card task";
-      c.innerHTML = `<span class="score">${t.score}</span><span>${esc(t.text)}` +
+      c.innerHTML = `<input type="checkbox" title="Mark done"><span class="score">${t.score}</span><span>${esc(t.text)}` +
         `${t.priority === "high" ? ' <span class="prio">⏫</span>' : t.priority === "low" ? ' <span class="prio">🔽</span>' : ""}` +
         `${t.due ? ` <span class="due">due ${esc(t.due)}</span>` : ""}</span>`;
+      c.querySelector("input").onchange = async () => {
+        await fetch("/api/task/done", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: t.text }),
+        });
+        loadTasks();
+      };
       v.appendChild(c);
     }
-  }
-}
-
-// ---------- agenda ----------
-
-async function loadAgenda() {
-  const v = $("#agendaView");
-  const { events, source, error } = await (await fetch("/api/agenda")).json();
-  v.innerHTML = "";
-  const h = document.createElement("h2");
-  h.className = "section";
-  h.textContent = source === "google" ? "Next 7 days (Google Calendar)" : source === "mirror" ? "Local mirror (connect Google Calendar for live data)" : "Calendar error: " + error;
-  v.appendChild(h);
-  if (!events.length) { v.innerHTML += '<div class="empty">Nothing booked.</div>'; return; }
-  for (const e of events) {
-    const c = document.createElement("div");
-    c.className = "card";
-    c.innerHTML = `<span style="font-family:var(--mono);font-size:13.5px">${esc(e)}</span>`;
-    v.appendChild(c);
   }
 }
 
@@ -247,14 +234,28 @@ async function loadAgenda() {
 
 let graphRunning = false;
 async function loadGraph() {
-  const { nodes, edges } = await (await fetch("/api/graph")).json();
   const canvas = $("#graphCanvas");
   const ctx = canvas.getContext("2d");
   const wrap = $("#graphView");
-  canvas.width = wrap.clientWidth * devicePixelRatio;
-  canvas.height = wrap.clientHeight * devicePixelRatio;
+  const W = wrap.clientWidth || 900;
+  const H = wrap.clientHeight || 600;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
   ctx.scale(devicePixelRatio, devicePixelRatio);
-  const W = wrap.clientWidth, H = wrap.clientHeight;
+
+  let nodes, edges;
+  try {
+    const data = await (await fetch("/api/graph")).json();
+    if (data.error) throw new Error(data.error);
+    ({ nodes, edges } = data);
+  } catch (e) {
+    ctx.font = "14px system-ui";
+    ctx.fillStyle = "#b0483a";
+    ctx.fillText("Graph failed to load: " + e.message, 40, 60);
+    return;
+  }
 
   const style = getComputedStyle(document.documentElement);
   const cThought = style.getPropertyValue("--muted").trim();

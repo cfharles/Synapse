@@ -58,22 +58,30 @@ export async function processMessage(message, { vault, cfg, io }) {
       }
       case "task": {
         const due = it.task?.due || null;
-        const landed = addTask(vault, {
+        const res = addTask(vault, {
           cleaned: it.cleaned,
           due,
           priority: it.task?.priority || "normal",
           bucket: it.task?.bucket || null,
         });
-        // Hard deadlines also get an all-day calendar entry.
+        if (res.duplicate) {
+          confirmations.push(`→ Already on the list ("${trunc(res.existing)}"), skipped duplicate.`);
+          break;
+        }
+        // Hard deadlines also get an all-day calendar entry (best-effort).
         let deadlineNote = "";
         if (due && calendar) {
-          await calendar.create({ title: `Due: ${it.cleaned}`, date: due, time: null });
-          vault.appendCalendarMirror(`- ${due} (all day) — Due: ${it.cleaned}`);
-          deadlineNote = ", deadline on calendar";
+          try {
+            await calendar.create({ title: `Due: ${it.cleaned}`, date: due, time: null });
+            vault.appendCalendarMirror(`- ${due} (all day) — Due: ${it.cleaned}`);
+            deadlineNote = ", deadline on calendar";
+          } catch {
+            deadlineNote = " (calendar unavailable, deadline not synced)";
+          }
         }
         const bucketNames = { top5: "Top 5", week: "This week", later: "Later", waiting: "Waiting" };
         confirmations.push(
-          `→ Task ranked into ${bucketNames[landed]}${due ? ` (due ${due})` : ""}${deadlineNote}: "${trunc(it.cleaned)}"`
+          `→ Task ranked into ${bucketNames[res.bucket]}${due ? ` (due ${due})` : ""}${deadlineNote}: "${trunc(it.cleaned)}"`
         );
         break;
       }
@@ -100,24 +108,32 @@ export async function processMessage(message, { vault, cfg, io }) {
         const assumedDuration = !ev.durationMin;
         const start = new Date(`${ev.date}T${ev.time}:00`);
         const end = new Date(start.getTime() + durationMin * 60_000);
-        const overlaps = await calendar.conflicts(start, end);
-        if (overlaps.length > 0) {
-          const a = await io.ask(`That overlaps "${overlaps[0]}". Book anyway? (y/n)`);
-          if (!/^\s*y/i.test(a)) {
-            vault.appendInbox("EVENT-SKIPPED (conflict)", it.raw);
-            confirmations.push(`→ Not booked (conflict), parked in inbox: "${trunc(it.raw)}"`);
-            break;
-          }
-        }
         const title = it.title || it.cleaned;
-        await calendar.create({
-          title, date: ev.date, time: ev.time, durationMin,
-          location: ev.location || null, attendees: ev.attendees || [],
-        });
-        vault.appendCalendarMirror(`- ${ev.date} ${ev.time} — ${title}`);
-        confirmations.push(
-          `→ Event booked ${ev.date} ${ev.time}: "${trunc(title)}"${assumedDuration ? " (assumed 1h, say if wrong)" : ""}`
-        );
+        try {
+          const overlaps = await calendar.conflicts(start, end);
+          if (overlaps.length > 0) {
+            const a = await io.ask(`That overlaps "${overlaps[0]}". Book anyway? (y/n)`);
+            if (!/^\s*y/i.test(a)) {
+              vault.appendInbox("EVENT-SKIPPED (conflict)", it.raw);
+              confirmations.push(`→ Not booked (conflict), parked in inbox: "${trunc(it.raw)}"`);
+              break;
+            }
+          }
+          await calendar.create({
+            title, date: ev.date, time: ev.time, durationMin,
+            location: ev.location || null, attendees: ev.attendees || [],
+          });
+          vault.appendCalendarMirror(`- ${ev.date} ${ev.time} — ${title}`);
+          confirmations.push(
+            `→ Event booked ${ev.date} ${ev.time}: "${trunc(title)}"${assumedDuration ? " (assumed 1h, say if wrong)" : ""}`
+          );
+        } catch (e) {
+          // Calendar failure must never sink the message: park it, keep going.
+          vault.appendInbox(`EVENT (calendar error)`, `${it.raw} → ${ev.date} ${ev.time}`);
+          confirmations.push(
+            `→ Calendar unavailable (${trunc(e.message, 60)}). Event parked in inbox: "${trunc(title)}"`
+          );
+        }
         break;
       }
       case "correction": {

@@ -11,7 +11,7 @@ import { loadConfig } from "./config.js";
 import { Vault, slugify } from "./vault.js";
 import { processMessage } from "./pipeline.js";
 import { getCalendar } from "./gcal.js";
-import { parseTasks, score } from "./tasks.js";
+import { parseTasks, score, completeTask } from "./tasks.js";
 import { briefing } from "./memory.js";
 
 const PORT = Number(process.env.SYNAPSE_PORT || 8377);
@@ -77,8 +77,9 @@ function thoughtsList() {
   const dir = vault.p("thoughts");
   if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith(".md"))
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && d.name.endsWith(".md"))
+    .map((d) => d.name)
     .sort()
     .reverse()
     .slice(0, 30)
@@ -100,8 +101,9 @@ function graphData() {
   for (const dir of ["thoughts", "notes"]) {
     const full = vault.p(dir);
     if (!fs.existsSync(full)) continue;
-    for (const f of fs.readdirSync(full)) {
-      if (!f.endsWith(".md")) continue;
+    for (const d of fs.readdirSync(full, { withFileTypes: true })) {
+      if (!d.isFile() || !d.name.endsWith(".md")) continue;
+      const f = d.name;
       const name = f.replace(/\.md$/, "");
       const txt = fs.readFileSync(path.join(full, f), "utf8");
       const isHub = /^type:\s*hub/m.test(txt.slice(0, 300));
@@ -192,6 +194,12 @@ const server = http.createServer(async (req, res) => {
         const r = vault.undoLast();
         return json(res, 200, r);
       }
+      case "POST /api/task/done": {
+        const { text } = await body(req);
+        const ok = completeTask(vault, text);
+        if (ok) vault.commit(`synapse: completed task "${text.slice(0, 50)}"`);
+        return json(res, 200, { ok });
+      }
       case "GET /api/thoughts":
         return json(res, 200, thoughtsList());
       case "GET /api/graph":
@@ -213,4 +221,5 @@ const server = http.createServer(async (req, res) => {
 // Localhost only, deliberately: exposing this needs auth first (see docs).
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Synapse UI → http://127.0.0.1:${PORT}`);
+  console.log(`Vault      → ${cfg.vaultPath}`);
 });

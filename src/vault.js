@@ -60,8 +60,9 @@ export class Vault {
     for (const dir of ["thoughts", "notes"]) {
       const full = this.p(dir);
       if (!fs.existsSync(full)) continue;
-      for (const f of fs.readdirSync(full)) {
-        if (!f.endsWith(".md")) continue;
+      for (const d of fs.readdirSync(full, { withFileTypes: true })) {
+        if (!d.isFile() || !d.name.endsWith(".md")) continue;
+        const f = d.name;
         const name = f.replace(/\.md$/, "");
         const head = fs.readFileSync(path.join(full, f), "utf8").slice(0, 400);
         const isHub = /^type:\s*hub/m.test(head);

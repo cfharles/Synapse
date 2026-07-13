@@ -16,10 +16,9 @@ GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=xxx
 ```
 
-6. Authorize once:
+6. Authorize once (`.env` is loaded automatically):
 
 ```bash
-export $(cat .env | xargs)
 node src/index.js auth-gcal
 ```
 
